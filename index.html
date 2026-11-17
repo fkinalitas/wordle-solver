@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wordle Çözücü</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#121213; color:#fff; max-width:480px; margin:20px auto; padding:0 12px; text-align:center; }
+  #board { display:grid; gap:6px; justify-content:center; margin:16px 0; }
+  .row { display:flex; gap:6px; }
+  .tile { width:56px; height:56px; border:2px solid #3a3a3c; font-size:28px; font-weight:bold; display:flex; align-items:center; justify-content:center; text-transform:uppercase; cursor:pointer; user-select:none; }
+  .tile.g { background:#3a3a3c; border-color:#3a3a3c; }
+  .tile.y { background:#b59f3b; border-color:#b59f3b; }
+  .tile.G { background:#538d4e; border-color:#538d4e; }
+  .tile.active { border-color:#fff; }
+  button { background:#3a3a3c; color:#fff; border:0; padding:8px 14px; margin:4px; border-radius:4px; cursor:pointer; font-size:14px; }
+  #sugg { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:10px; }
+  #sugg button { text-transform:uppercase; background:#2a2a2c; }
+  #info { color:#aaa; font-size:14px; min-height:20px; }
+  small { color:#888; }
+</style>
+</head>
+<body>
+<h2>Wordle Çözücü</h2>
+<small>Harfleri yaz, kareye tıklayarak rengi değiştir (gri → sarı → yeşil), sonra "Öneri Al" bas.</small>
+<input id="kb" maxlength="5" placeholder="Tahmin yaz" autocomplete="off" autocapitalize="off" style="font-size:20px;padding:8px;width:140px;text-align:center;margin-top:12px">
+<div id="board"></div>
+<div>
+  <button id="solve">Öneri Al</button>
+  <button id="undo">Satırı Sil</button>
+  <button id="reset">Sıfırla</button>
+</div>
+<div id="info"></div>
+<div id="sugg"></div>
+
+<script src="words.js"></script>
+<script>
+const ROWS = 6, COLS = 5;
+const CLS = ['g', 'y', 'G'];
+let rows; // {letters:[], colors:[]}
+let cur;
+
+const lower = s => s.toLocaleLowerCase('tr');
+const upper = s => s.toLocaleUpperCase('tr');
+
+function init() {
+  rows = Array.from({length: ROWS}, () => ({letters: [], colors: Array(COLS).fill(0)}));
+  cur = 0;
+  render();
+  document.getElementById('sugg').innerHTML = '';
+  document.getElementById('info').textContent = '';
+}
+
+function render() {
+  const b = document.getElementById('board');
+  b.innerHTML = '';
+  rows.forEach((r, ri) => {
+    const d = document.createElement('div');
+    d.className = 'row';
+    for (let i = 0; i < COLS; i++) {
+      const t = document.createElement('div');
+      t.className = 'tile ' + CLS[r.colors[i]] + (ri === cur && i === r.letters.length ? ' active' : '');
+      t.textContent = r.letters[i] || '';
+      t.onclick = () => {
+        if (!r.letters[i]) return;
+        r.colors[i] = (r.colors[i] + 1) % 3;
+        render();
+      };
+      d.appendChild(t);
+    }
+    b.appendChild(d);
+  });
+}
+
+// Standart Wordle geri bildirimi (tekrar eden harfler dahil)
+function feedback(guess, answer) {
+  const res = Array(COLS).fill(0);
+  const left = {};
+  for (let i = 0; i < COLS; i++) {
+    if (guess[i] === answer[i]) res[i] = 2;
+    else left[answer[i]] = (left[answer[i]] || 0) + 1;
+  }
+  for (let i = 0; i < COLS; i++) {
+    if (res[i] === 0 && left[guess[i]] > 0) { res[i] = 1; left[guess[i]]--; }
+  }
+  return res;
+}
+
+function candidates() {
+  const done = rows.filter(r => r.letters.length === COLS);
+  return WORDS.filter(w => done.every(r => {
+    const g = r.letters.join('');
+    const f = feedback(g, w);
+    return f.every((c, i) => c === r.colors[i]);
+  }));
+}
+
+function rank(list) {
+  const freq = {};
+  list.forEach(w => new Set(w).forEach(c => freq[c] = (freq[c] || 0) + 1));
+  return list.map(w => ({w, s: [...new Set(w)].reduce((a, c) => a + freq[c], 0)}))
+             .sort((a, b) => b.s - a.s);
+}
+
+function solve() {
+  const list = candidates();
+  const info = document.getElementById('info');
+  const s = document.getElementById('sugg');
+  s.innerHTML = '';
+  info.textContent = list.length ? `${list.length} olası kelime` : 'Eşleşen kelime yok (renkleri kontrol et).';
+  rank(list).slice(0, 24).forEach(({w}) => {
+    const btn = document.createElement('button');
+    btn.textContent = w;
+    btn.onclick = () => fill(w);
+    s.appendChild(btn);
+  });
+}
+
+function fill(w) {
+  if (cur >= ROWS) return;
+  rows[cur].letters = [...w];
+  render();
+}
+
+function key(e) {
+  if (cur >= ROWS) return;
+  if (e.target.id === 'kb' && e.key !== 'Enter') return;
+  const r = rows[cur];
+  if (e.key === 'Backspace') { r.letters.pop(); r.colors[r.letters.length] = 0; }
+  else if (e.key === 'Enter') {
+    if (r.letters.length === COLS) { cur++; solve(); document.getElementById('kb').value = ''; }
+  }
+  else if (e.key.length === 1 && /\p{L}/u.test(e.key) && r.letters.length < COLS) {
+    r.letters.push(lower(e.key));
+  } else return;
+  render();
+}
+
+document.addEventListener('keydown', key);
+document.getElementById('kb').addEventListener('input', e => {
+  if (cur >= ROWS) return;
+  const l = [...lower(e.target.value)].filter(c => /\p{L}/u.test(c)).slice(0, COLS);
+  rows[cur].letters = l;
+  rows[cur].colors = Array(COLS).fill(0);
+  render();
+});
+document.getElementById('solve').onclick = () => {
+  const r = rows[cur];
+  if (r && r.letters.length === COLS) { cur++; document.getElementById('kb').value = ''; }
+  solve(); render();
+};
+document.getElementById('undo').onclick = () => {
+  if (cur > 0 && !rows[cur].letters.length) cur--;
+  rows[cur] = {letters: [], colors: Array(COLS).fill(0)};
+  render(); solve();
+};
+document.getElementById('reset').onclick = init;
+init();
+solve();
+</script>
+</body>
+</html>
